@@ -30,6 +30,10 @@ def layout(title, content):
         <a href="/" class="btn btn-dark">Home 首頁</a>
     </div>
 
+    <footer class="text-center text-muted py-4">
+        Free Online Tools © 2026
+    </footer>
+
     </body>
     </html>
     """
@@ -53,7 +57,7 @@ def home():
     return f"""
     <html>
     <head>
-        <title>My Tool Website</title>
+        <title>Free Online Tools</title>
         {BOOTSTRAP}
     </head>
     <body class="bg-light">
@@ -66,6 +70,7 @@ def home():
 
     <div class="container py-5">
         <h1 class="text-center mb-4">Free Online Tools 免費工具</h1>
+
         <div class="row">
 
             {tool_card("QR Code", "QR Code 產生器", "/qr", "primary")}
@@ -78,6 +83,9 @@ def home():
             {tool_card("Color Picker", "顏色選擇器", "/color", "primary")}
             {tool_card("JSON Formatter", "JSON 格式化", "/json", "success")}
             {tool_card("Text Case", "文字大小寫轉換", "/case", "warning")}
+            {tool_card("Word Counter", "字數計算", "/word", "info")}
+            {tool_card("Lorem Ipsum", "假文產生器", "/lorem", "secondary")}
+            {tool_card("IP Lookup", "IP 查詢", "/ip", "dark")}
 
         </div>
     </div>
@@ -91,7 +99,7 @@ def qr():
     text = request.args.get("text", "")
     return layout("QR Code Generator", f"""
     <form>
-        <input class="form-control mb-3" name="text" placeholder="Enter text">
+        <input class="form-control mb-3" name="text">
         <button class="btn btn-primary">Generate</button>
     </form>
     <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={text}">
@@ -127,7 +135,7 @@ def base64tool():
     Decoded: {decoded}
     """)
 
-# URL
+# URL Encode
 @app.route("/urltool")
 def urltool():
     text = request.args.get("text", "")
@@ -218,6 +226,36 @@ def casetool():
     </form>
     Upper: {text.upper()}<br>
     Lower: {text.lower()}
+    """)
+
+# Word Counter
+@app.route("/word")
+def word():
+    text = request.args.get("text", "")
+    count = len(text.split())
+    return layout("Word Counter", f"""
+    <form>
+        <textarea class="form-control mb-3" name="text" rows="5"></textarea>
+        <button class="btn btn-info">Count</button>
+    </form>
+    Words: {count}
+    """)
+
+# Lorem Ipsum
+@app.route("/lorem")
+def lorem():
+    text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit."
+    return layout("Lorem Ipsum Generator", f"""
+    <p>{text}</p>
+    <a href="/lorem" class="btn btn-secondary">Generate</a>
+    """)
+
+# IP
+@app.route("/ip")
+def ip():
+    return layout("IP Lookup", """
+    <p>Your IP info:</p>
+    <a href="https://api.ipify.org">Check IP</a>
     """)
 
 # API
