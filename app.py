@@ -1,18 +1,35 @@
-from flask import Flask, request
-import random, string, base64, urllib.parse, time, datetime, uuid, hashlib, json
+from flask import Flask, request, send_file
+import random
+import string
+import base64
+import urllib.parse
+import time
+import datetime
+import uuid
+import hashlib
+import json
+import io
+import html
+import zipfile
+
+from PIL import Image
+from PyPDF2 import PdfMerger, PdfReader, PdfWriter
 
 app = Flask(__name__)
 
 BOOTSTRAP = """
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 """
+
+def h(v):
+    return html.escape("" if v is None else str(v))
 
 def layout(title, content):
     return f"""
     <html>
     <head>
         <title>{title}</title>
-        <meta name="description" content="{title} Free Online Tool">
         {BOOTSTRAP}
     </head>
     <body class="bg-light">
@@ -72,7 +89,6 @@ def home():
         <h1 class="text-center mb-4">Free Online Tools 免費工具</h1>
 
         <div class="row">
-
             {tool_card("QR Code", "QR Code 產生器", "/qr", "primary")}
             {tool_card("Password", "密碼產生器", "/password", "success")}
             {tool_card("Base64", "Base64 編碼解碼", "/base64tool", "warning")}
@@ -80,13 +96,15 @@ def home():
             {tool_card("Timestamp", "時間戳轉換", "/timestamp", "secondary")}
             {tool_card("UUID", "UUID 產生器", "/uuidtool", "dark")}
             {tool_card("Hash", "Hash 產生器", "/hashtool", "danger")}
-            {tool_card("Color Picker", "顏色選擇器", "/color", "primary")}
             {tool_card("JSON Formatter", "JSON 格式化", "/json", "success")}
-            {tool_card("Text Case", "文字大小寫轉換", "/case", "warning")}
             {tool_card("Word Counter", "字數計算", "/word", "info")}
-            {tool_card("Lorem Ipsum", "假文產生器", "/lorem", "secondary")}
-            {tool_card("IP Lookup", "IP 查詢", "/ip", "dark")}
-
+            {tool_card("Image to JPG", "圖片轉 JPG", "/image-to-jpg", "primary")}
+            {tool_card("Image to PNG", "圖片轉 PNG", "/image-to-png", "success")}
+            {tool_card("Image Resize", "圖片縮放", "/image-resize", "warning")}
+            {tool_card("Image Compress", "圖片壓縮", "/image-compress", "secondary")}
+            {tool_card("PDF Merge", "PDF 合併", "/pdf-merge", "danger")}
+            {tool_card("PDF Split", "PDF 分割", "/pdf-split", "secondary")}
+            {tool_card("YouTube Thumbnail", "YouTube 縮圖下載", "/youtube-thumb", "dark")}
         </div>
     </div>
     </body>
@@ -102,7 +120,7 @@ def qr():
         <input class="form-control mb-3" name="text">
         <button class="btn btn-primary">Generate</button>
     </form>
-    <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={text}">
+    <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={h(text)}">
     """)
 
 # Password
@@ -120,19 +138,22 @@ def password():
 @app.route("/base64tool")
 def base64tool():
     text = request.args.get("text", "")
-    encoded = base64.b64encode(text.encode()).decode() if text else ""
+    encoded = ""
     decoded = ""
-    try:
-        decoded = base64.b64decode(text.encode()).decode()
-    except:
-        pass
+    if text:
+        encoded = base64.b64encode(text.encode()).decode()
+        try:
+            decoded = base64.b64decode(text.encode()).decode()
+        except:
+            decoded = "Decode Error"
+
     return layout("Base64 Tool", f"""
     <form>
-        <input class="form-control mb-3" name="text">
+        <textarea class="form-control mb-3" name="text">{h(text)}</textarea>
         <button class="btn btn-warning">Convert</button>
     </form>
-    Encoded: {encoded}<br>
-    Decoded: {decoded}
+    Encoded:<br>{h(encoded)}<br><br>
+    Decoded:<br>{h(decoded)}
     """)
 
 # URL Encode
@@ -141,11 +162,11 @@ def urltool():
     text = request.args.get("text", "")
     return layout("URL Encode Decode", f"""
     <form>
-        <input class="form-control mb-3" name="text">
+        <textarea class="form-control mb-3" name="text">{h(text)}</textarea>
         <button class="btn btn-info">Convert</button>
     </form>
-    Encoded: {urllib.parse.quote(text)}<br>
-    Decoded: {urllib.parse.unquote(text)}
+    Encoded:<br>{urllib.parse.quote(text)}<br><br>
+    Decoded:<br>{urllib.parse.unquote(text)}
     """)
 
 # Timestamp
@@ -156,7 +177,10 @@ def timestamp():
     result = ""
     if ts:
         try:
-            result = datetime.datetime.fromtimestamp(int(ts))
+            if len(ts) > 10:
+                result = datetime.datetime.fromtimestamp(int(ts)/1000)
+            else:
+                result = datetime.datetime.fromtimestamp(int(ts))
         except:
             result = "Invalid"
     return layout("Timestamp Converter", f"""
@@ -187,18 +211,11 @@ def hashtool():
         <input class="form-control mb-3" name="text">
         <button class="btn btn-danger">Generate</button>
     </form>
-    MD5: {md5}<br>
-    SHA256: {sha}
+    MD5:<br>{md5}<br><br>
+    SHA256:<br>{sha}
     """)
 
-# Color
-@app.route("/color")
-def color():
-    return layout("Color Picker", """
-    <input type="color">
-    """)
-
-# JSON
+# JSON Formatter
 @app.route("/json")
 def jsontool():
     text = request.args.get("text", "")
@@ -206,26 +223,14 @@ def jsontool():
     try:
         formatted = json.dumps(json.loads(text), indent=4)
     except:
-        pass
+        formatted = "Invalid JSON"
+
     return layout("JSON Formatter", f"""
     <form>
-        <textarea class="form-control mb-3" name="text" rows="6"></textarea>
+        <textarea class="form-control mb-3" name="text" rows="6">{h(text)}</textarea>
         <button class="btn btn-success">Format</button>
     </form>
     <pre>{formatted}</pre>
-    """)
-
-# Text case
-@app.route("/case")
-def casetool():
-    text = request.args.get("text", "")
-    return layout("Text Case Converter", f"""
-    <form>
-        <input class="form-control mb-3" name="text">
-        <button class="btn btn-warning">Convert</button>
-    </form>
-    Upper: {text.upper()}<br>
-    Lower: {text.lower()}
     """)
 
 # Word Counter
@@ -233,29 +238,142 @@ def casetool():
 def word():
     text = request.args.get("text", "")
     count = len(text.split())
+    chars = len(text)
     return layout("Word Counter", f"""
     <form>
-        <textarea class="form-control mb-3" name="text" rows="5"></textarea>
+        <textarea class="form-control mb-3" name="text" rows="5">{h(text)}</textarea>
         <button class="btn btn-info">Count</button>
     </form>
-    Words: {count}
+    Words: {count}<br>
+    Characters: {chars}
     """)
 
-# Lorem Ipsum
-@app.route("/lorem")
-def lorem():
-    text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit."
-    return layout("Lorem Ipsum Generator", f"""
-    <p>{text}</p>
-    <a href="/lorem" class="btn btn-secondary">Generate</a>
+# Image tools
+@app.route("/image-to-jpg", methods=["GET","POST"])
+def image_to_jpg():
+    if request.method == "POST":
+        file = request.files["image"]
+        img = Image.open(file.stream).convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        buf.seek(0)
+        return send_file(buf, mimetype="image/jpeg")
+    return layout("Image to JPG", """
+    <form method="POST" enctype="multipart/form-data">
+        <input class="form-control mb-3" type="file" name="image">
+        <button class="btn btn-primary">Convert</button>
+    </form>
     """)
 
-# IP
-@app.route("/ip")
-def ip():
-    return layout("IP Lookup", """
-    <p>Your IP info:</p>
-    <a href="https://api.ipify.org">Check IP</a>
+@app.route("/image-to-png", methods=["GET","POST"])
+def image_to_png():
+    if request.method == "POST":
+        file = request.files["image"]
+        img = Image.open(file.stream)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+        return send_file(buf, mimetype="image/png")
+    return layout("Image to PNG", """
+    <form method="POST" enctype="multipart/form-data">
+        <input class="form-control mb-3" type="file" name="image">
+        <button class="btn btn-success">Convert</button>
+    </form>
+    """)
+
+@app.route("/image-resize", methods=["GET","POST"])
+def image_resize():
+    if request.method == "POST":
+        file = request.files["image"]
+        width = int(request.form["width"])
+        height = int(request.form["height"])
+        img = Image.open(file.stream)
+        img = img.resize((width, height))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+        return send_file(buf, mimetype="image/png")
+    return layout("Image Resize", """
+    <form method="POST" enctype="multipart/form-data">
+        <input class="form-control mb-2" type="file" name="image">
+        <input class="form-control mb-2" name="width" placeholder="Width">
+        <input class="form-control mb-2" name="height" placeholder="Height">
+        <button class="btn btn-warning">Resize</button>
+    </form>
+    """)
+
+@app.route("/image-compress", methods=["GET","POST"])
+def image_compress():
+    if request.method == "POST":
+        file = request.files["image"]
+        quality = int(request.form["quality"])
+        img = Image.open(file.stream)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=quality)
+        buf.seek(0)
+        return send_file(buf, mimetype="image/jpeg")
+    return layout("Image Compress", """
+    <form method="POST" enctype="multipart/form-data">
+        <input class="form-control mb-2" type="file" name="image">
+        <input class="form-control mb-2" name="quality" placeholder="Quality 1-95">
+        <button class="btn btn-secondary">Compress</button>
+    </form>
+    """)
+
+# PDF tools
+@app.route("/pdf-merge", methods=["GET","POST"])
+def pdf_merge():
+    if request.method == "POST":
+        files = request.files.getlist("pdfs")
+        merger = PdfMerger()
+        for f in files:
+            merger.append(f)
+        buf = io.BytesIO()
+        merger.write(buf)
+        buf.seek(0)
+        return send_file(buf, mimetype="application/pdf")
+    return layout("PDF Merge", """
+    <form method="POST" enctype="multipart/form-data">
+        <input class="form-control mb-3" type="file" name="pdfs" multiple>
+        <button class="btn btn-danger">Merge PDF</button>
+    </form>
+    """)
+
+@app.route("/pdf-split", methods=["GET","POST"])
+def pdf_split():
+    if request.method == "POST":
+        file = request.files["pdf"]
+        reader = PdfReader(file)
+        writer = PdfWriter()
+        page_num = int(request.form["page"]) - 1
+        writer.add_page(reader.pages[page_num])
+        buf = io.BytesIO()
+        writer.write(buf)
+        buf.seek(0)
+        return send_file(buf, mimetype="application/pdf")
+    return layout("PDF Split", """
+    <form method="POST" enctype="multipart/form-data">
+        <input class="form-control mb-2" type="file" name="pdf">
+        <input class="form-control mb-2" name="page" placeholder="Page number">
+        <button class="btn btn-secondary">Split PDF</button>
+    </form>
+    """)
+
+# YouTube Thumbnail
+@app.route("/youtube-thumb")
+def youtube_thumb():
+    url = request.args.get("url", "")
+    vid = ""
+    if "v=" in url:
+        vid = url.split("v=")[1].split("&")[0]
+    thumb = f"https://img.youtube.com/vi/{vid}/maxresdefault.jpg" if vid else ""
+
+    return layout("YouTube Thumbnail Downloader", f"""
+    <form>
+        <input class="form-control mb-3" name="url" placeholder="YouTube URL">
+        <button class="btn btn-dark">Get Thumbnail</button>
+    </form>
+    {"<img src='"+thumb+"' width='400'>" if thumb else ""}
     """)
 
 # API
