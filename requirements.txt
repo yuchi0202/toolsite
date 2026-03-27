@@ -2,3 +2,4 @@ flask
 gunicorn
 Pillow
 PyPDF2
+python-multipart
